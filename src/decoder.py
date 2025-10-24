@@ -3,7 +3,7 @@ import torch.nn as nn
 
 try:
     from utils import MultiHeadAttention, FeedForward, Embeddings
-except ModuleNotFoundError:
+except ImportError:
     from src.utils import MultiHeadAttention, FeedForward, Embeddings
 
 class TransformerDecoderLayer(nn.Module):
@@ -47,12 +47,12 @@ class TransformerDecoderLayer(nn.Module):
         """
         # Apply layer normalization and masked multi-head self-attention
         hidden_state = self.layer_norm_1(x)
-        self_att = self.self_attention(hidden_state, tgt_mask)
+        self_att = self.self_attention(hidden_state, hidden_state, hidden_state, tgt_mask)
         x = x+self_att
 
         # Apply layer normalization and cross-attention
         hidden_state2 = self.layer_norm_2(x)
-        cross_att = self.cross_attention(hidden_state2, tgt_mask)
+        cross_att = self.cross_attention(hidden_state2, hidden_state2, hidden_state2, tgt_mask)
         x = x + cross_att
         
         # Apply layer normalization and feed-forward network
