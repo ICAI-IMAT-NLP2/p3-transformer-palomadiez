@@ -26,9 +26,9 @@ class AttentionHead(nn.Module):
     def __init__(self, d_model: int, d_k: int, d_q: int, d_v: int):
         super(AttentionHead, self).__init__()
 
-        self.wq = None
-        self.wk = None
-        self.wv = None
+        self.wq = nn.Linear(d_model, d_q)
+        self.wk = nn.Linear(d_model, d_k)
+        self.wv = nn.Linear(d_model, d_v)
 
     def scaled_dot_product_attention(self, q, k, v, mask=None):
         """Calculate the attention weights with optional causal mask.
@@ -45,22 +45,25 @@ class AttentionHead(nn.Module):
         """
 
         # The dimension of the key tensor, used to scale the scores.
-        dim_k = None
+        _, _, d_k = k.shape
+        dim_k = d_k
 
         # Calculate the dot product between query and the transpose of key.
         # The result is then scaled by the square root of dim_k.
-        scores = None
+        scores = torch.matmul(q, k.transpose(-2, -1))
+        scores_scaled = scores/math.sqrt(dim_k)
+
 
         if mask is not None:
-            # Apply the causal mask by setting the masked positions to a very large negative value.
-            scores = None
+            # 0 = bloquear ; 1 = dejar pasar
+            scores_scaled = scores_scaled.masked_fill(mask == 0, float("-inf"))
 
         # Apply the softmax function to obtain the attention weights.
-        weights = None
+        weights = F.softmax(scores_scaled, dim=-1)
 
         # Compute the output by performing a weighted sum of the value tensor
         # using the attention weights.
-        output = None
+        output = torch.matmul(weights,v)
 
         return output, weights
 
@@ -77,11 +80,11 @@ class AttentionHead(nn.Module):
             Tensor: Output tensor of shape (batch_size, seq_len, d_v).
         """
         # Project input tensor to query, key, and value tensors.
-        q = None
-        k = None
-        v = None
+        q = self.wq(x_q)
+        k = self.wk(x_k)
+        v = self.wv(x_v)
 
-        output, _ = None
+        output, _ = self.scaled_dot_product_attention(q,k,v, mask)
 
         return output
 
@@ -104,11 +107,10 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, d_model: int, num_attention_heads: int):
         super(MultiHeadAttention, self).__init__()
         assert d_model % num_attention_heads == 0, "d_model must be divisible by num_attention_heads"
-        d_v = None
-        d_k = None
+        d_k = d_q = d_v = d_model//num_attention_heads
 
-        self.heads = None
-        self.output_linear = None
+        self.heads = nn.ModuleList([AttentionHead(d_model, d_k, d_q, d_v) for i in range(num_attention_heads)])
+        self.output_linear = nn.Linear(num_attention_heads*d_v, d_model, bias=False)
 
     def forward(self, x_q, x_k, x_v, mask=None):
         """Forward pass for the multi-head attention layer with optional causal mask.
@@ -122,12 +124,23 @@ class MultiHeadAttention(nn.Module):
         Returns:
             Tensor: Output tensor of shape (batch_size, seq_len, d_model).
         """
-        # Concatenate the outputs from all attention heads.
-        x = None
+        _, _, d_model = x_q.shape
+        num_attention_heads = len(list(self.heads))
 
-        # Apply the linear layer 
-        x = None
-        return x
+        if d_model % num_attention_heads != 0:
+            raise RuntimeError(f"{d_model} must be divisible by {num_attention_heads}")
+        
+        # Aplicar cada cabeza de atención al conjunto (q, k, v)
+        x_list = []
+        for i, layer in enumerate(self.heads):
+            x_list.append(layer(x_q, x_k, x_v, mask))
+        
+        # Concatenar resultados de las cabezas en la dimensión del modelo
+        x = torch.cat(x_list, dim=2)
+        
+        # Aplicar la capa lineal final
+        output = self.output_linear(x)
+        return output
     
 class FeedForward(nn.Module):
     """FeedForward module for the Transformer Decoder.
